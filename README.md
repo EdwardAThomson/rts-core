@@ -13,10 +13,11 @@ Planned here as the engines need them: lockstep networking, the AI framework and
 
 ```toml
 [dependencies]
-rts-core = { git = "https://github.com/EdwardAThomson/rts-core", tag = "v0.1.0" }
+rts-core = { git = "https://github.com/EdwardAThomson/rts-core", rev = "<commit>" }
 ```
 
-This repository is private, so a build that fetches it needs GitHub access: locally, set
+Pin a commit with `rev`, so a change here never alters an engine's hashes until that engine moves on to it and
+its golden tests pass. This repository is private, so a build that fetches it needs GitHub access: locally, set
 `net.git-fetch-with-cli = true` in `.cargo/config.toml` so Cargo uses your git credentials; in CI, see the
 consuming repository's workflow.
 
@@ -26,7 +27,7 @@ consuming repository's workflow.
   no iteration over `HashMap`/`HashSet`. `crates/core/clippy.toml` bans the types and the crate denies float
   arithmetic; CI runs clippy with `-D warnings`.
 - **A change that alters any hash is a breaking change.** Both engines' golden tests pin hashes made with this
-  crate, so bump the version and say so.
+  crate, so bump the crate version and say so.
 - **No protected names, no setting-specific words.** Generic ids only.
 - **No third-party dependencies** unless one clearly pays for itself.
 
