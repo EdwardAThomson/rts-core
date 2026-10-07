@@ -1,0 +1,10 @@
+# Determinism (CLAUDE.md): no floating point, clock, outside randomness or unordered collections in the
+# simulation. Clippy enforces it with -D warnings in CI.
+disallowed-types = [
+  { path = "f32", reason = "the simulation uses integer maths only" },
+  { path = "f64", reason = "the simulation uses integer maths only" },
+  { path = "std::collections::HashMap", reason = "iteration order is unordered; use BTreeMap or a Vec in id order" },
+  { path = "std::collections::HashSet", reason = "iteration order is unordered; use BTreeSet or a Vec<bool>" },
+  { path = "std::time::Instant", reason = "the simulation never reads the clock" },
+  { path = "std::time::SystemTime", reason = "the simulation never reads the clock" },
+]
