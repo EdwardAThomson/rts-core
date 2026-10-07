@@ -17,9 +17,7 @@ rts-core = { git = "https://github.com/EdwardAThomson/rts-core", rev = "<commit>
 ```
 
 Pin a commit with `rev`, so a change here never alters an engine's hashes until that engine moves on to it and
-its golden tests pass. This repository is private, so a build that fetches it needs GitHub access: locally, set
-`net.git-fetch-with-cli = true` in `.cargo/config.toml` so Cargo uses your git credentials; in CI, see the
-consuming repository's workflow.
+its golden tests pass.
 
 ## Rules
 
