@@ -33,11 +33,21 @@ its golden tests pass.
   pollster and cpal (sound; on Linux it builds against ALSA's headers, `libasound2-dev`, or build it without the
   `device` feature), plus wasm-bindgen, wasm-bindgen-futures, js-sys and web-sys for the browser.
 
+## Building and testing
+
+You need [rustup](https://rustup.rs); the first `cargo` command here installs the toolchain pinned in
+`rust-toolchain.toml` (Rust 1.97 with clippy, rustfmt and the WebAssembly target). `rts-core` needs nothing else.
+`rts-platform`'s sound device builds against ALSA on Linux:
+
 ```bash
+sudo apt-get install build-essential pkg-config libasound2-dev   # Debian and Ubuntu, for rts-platform's `device` feature
 cargo test
 cargo clippy --all-targets -- -D warnings
 cargo clippy --target wasm32-unknown-unknown -- -D warnings
+cargo build --no-default-features -p rts-platform                # without the sound device, so without ALSA
 ```
+
+There is nothing to run here: the engines' repositories have the games, players and tools.
 
 The code moved here from `rts-engine`: `rts-core` from `crates/engine-core` (as merged in rts-engine PR #5), and
 `rts-platform` from `crates/classic-render/src/platform`.
