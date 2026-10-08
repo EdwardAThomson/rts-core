@@ -1,0 +1,43 @@
+[package]
+name = "rts-platform"
+version = "0.1.0"
+description = "The platform layer shared by the RTS engines' renderers: GPU, sprite batching, a pixel font, sound, clock, files and the browser page."
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Unlike `rts-core`, this crate has third-party dependencies (Ed chose wgpu, 2026-10-07): wgpu draws on every desktop
+# GPU API and on the web, pollster waits for wgpu's async set-up on the desktop, and cpal plays sound on every desktop OS's audio API and through Web Audio in the browser.
+# It is never part of a simulation, so the determinism bans in `crates/core/clippy.toml` don't apply here.
+[dependencies]
+wgpu = "30"
+cpal = { version = "0.18", optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+pollster = "1"
+
+# `device` opens the sound card (cpal). Without it there is no `Speaker`, and on Linux nothing needs ALSA's headers
+# (`libasound2-dev`) to build: `cargo build --no-default-features -p rts-platform`.
+[features]
+default = ["device"]
+device = ["dep:cpal"]
+
+# The browser build: WebGL2 as well as WebGPU, sound through Web Audio, and the bindings wgpu already uses, to read
+# the clock, fetch files and talk to the page.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wgpu = { version = "30", features = ["webgl"] }
+cpal = { version = "0.18", optional = true, features = ["wasm-bindgen"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "console",
+    "Document",
+    "Element",
+    "HtmlCanvasElement",
+    "Location",
+    "Performance",
+    "Response",
+    "UrlSearchParams",
+    "Window",
+] }
