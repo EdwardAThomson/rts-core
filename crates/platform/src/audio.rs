@@ -7,8 +7,13 @@
 //! Limits follow the playbooks' audio design (`plans/rts/audio.md`): a cap on voices in all, a cap per sound, the
 //! same sound started again within 40 ms merged into the one already playing (a little louder), and when a cap is
 //! hit the quietest, least important voice gives way, or the new sound is dropped if it would be that voice.
+//!
+//! Besides one-shot sounds it plays **loops** (an engine, a drill: `start_loop`, then `set_loop` to follow the
+//! source and `stop_loop`), which fade in and out, glide to each new level and place, sit outside the one-shot caps
+//! and have a cap of their own (`max_loops`); and **music** on the music bus (`play_music`), long tracks read a
+//! block at a time as they play, with a crossfade from one track to the next.
 
-use super::wav::Clip;
+use super::wav::{Clip, Track};
 
 /// Mix groups, each with its own volume.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -41,6 +46,14 @@ impl Bus {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ClipId(pub u32);
+
+/// A loop the mixer is playing, from [`Mixer::start_loop`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct LoopId(pub u32);
+
+/// A piece of music added with [`Mixer::add_track`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TrackId(pub u32);
 
 /// One request to play a clip.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -82,6 +95,86 @@ struct Voice {
     base_gain: f32,
     /// Output samples left in a fade-out, for a stolen voice.
     fading: Option<u32>,
+    /// A loop's id: it plays round and round until stopped, outside the one-shot caps.
+    looping: Option<u32>,
+    /// A loop's fade, from 0 to 1, where it is heading and how far it moves each output sample.
+    env: f32,
+    env_to: f32,
+    env_step: f32,
+    /// The gain and pan a loop glides to over the next rendered buffer.
+    gain_to: f32,
+    pan_to: f32,
+}
+
+impl Voice {
+    fn new(sound: Sound, started: u64) -> Voice {
+        Voice {
+            sound,
+            at: 0.0,
+            started,
+            base_gain: sound.gain,
+            fading: None,
+            looping: None,
+            env: 1.0,
+            env_to: 1.0,
+            env_step: 0.0,
+            gain_to: sound.gain,
+            pan_to: sound.pan,
+        }
+    }
+
+    /// Counts against the one-shot caps: playing, not fading out, not a loop.
+    fn one_shot(&self) -> bool {
+        self.fading.is_none() && self.looping.is_none()
+    }
+}
+
+/// A track playing on the music bus. Two can play at once, while one fades into the next.
+struct Deck {
+    track: TrackId,
+    /// Position in the track, in its frames.
+    at: f64,
+    gain: f32,
+    looping: bool,
+    /// The fade, as for a loop: 0 to 1, its target and its step per output sample.
+    env: f32,
+    env_to: f32,
+    env_step: f32,
+    /// The two blocks decoded last, by block number: a block and the next, which interpolation reaches into.
+    cache: [(usize, Vec<f32>); 2],
+}
+
+impl Deck {
+    /// Frame `i`'s left and right samples, decoding its block if needed.
+    fn frame(&mut self, track: &Track, i: usize) -> (f32, f32) {
+        let per = track.per_block();
+        let k = i / per;
+        let slot = &mut self.cache[k % 2];
+        if slot.0 != k || slot.1.is_empty() {
+            slot.0 = k;
+            track.block(k, &mut slot.1);
+        }
+        let ch = track.channels as usize;
+        let j = (i - k * per) * ch;
+        match (slot.1.get(j), slot.1.get(j + ch - 1)) {
+            (Some(&l), Some(&r)) => (l, r),
+            _ => (0.0, 0.0),
+        }
+    }
+}
+
+/// Moves `env` one output sample towards `to` by `step`.
+fn approach(env: &mut f32, to: f32, step: f32) {
+    if *env < to {
+        *env = (*env + step).min(to);
+    } else if *env > to {
+        *env = (*env - step).max(to);
+    }
+}
+
+/// The per-sample step that covers 0 to 1 in `secs` at `rate`; instant for no time.
+fn ramp(secs: f32, rate: u32) -> f32 {
+    if secs <= 0.0 { 1.0 } else { 1.0 / (secs * rate as f32).max(1.0) }
 }
 
 /// Merge window and steal fade, in seconds.
@@ -93,13 +186,18 @@ pub struct Mixer {
     pub rate: u32,
     clips: Vec<Clip>,
     voices: Vec<Voice>,
+    tracks: Vec<Track>,
+    decks: Vec<Deck>,
+    next_loop: u32,
     /// Output frames rendered so far: the mixer's clock.
     now: u64,
     pub bus_gain: [f32; 4],
     pub master: f32,
     pub muted: bool,
-    /// Voices playing at once, all buses together (fading ones aside).
+    /// Voices playing at once, all buses together (fading ones and loops aside).
     pub max_voices: usize,
+    /// Loops playing at once (fading-out ones aside).
+    pub max_loops: usize,
 }
 
 impl Mixer {
@@ -108,12 +206,16 @@ impl Mixer {
             rate,
             clips: Vec::new(),
             voices: Vec::new(),
+            tracks: Vec::new(),
+            decks: Vec::new(),
+            next_loop: 0,
             now: 0,
             // Starting levels from the design: music -6 dB, ui -3 dB.
             bus_gain: [1.0, db(-3.0), 1.0, db(-6.0)],
             master: 1.0,
             muted: false,
             max_voices: 24,
+            max_loops: 6,
         }
     }
 
@@ -126,13 +228,13 @@ impl Mixer {
         &self.clips[id.0 as usize]
     }
 
-    /// Voices playing, not counting ones fading out.
+    /// One-shot voices playing, not counting ones fading out.
     pub fn playing(&self) -> usize {
-        self.voices.iter().filter(|v| v.fading.is_none()).count()
+        self.voices.iter().filter(|v| v.one_shot()).count()
     }
 
     pub fn playing_key(&self, key: u32) -> usize {
-        self.voices.iter().filter(|v| v.fading.is_none() && v.sound.key == key).count()
+        self.voices.iter().filter(|v| v.one_shot() && v.sound.key == key).count()
     }
 
     fn score(s: &Sound) -> f32 {
@@ -147,7 +249,7 @@ impl Mixer {
         let merge = (MERGE * self.rate as f32) as u64;
         let now = self.now;
         if let Some(v) =
-            self.voices.iter_mut().find(|v| v.fading.is_none() && v.sound.key == sound.key && now - v.started <= merge)
+            self.voices.iter_mut().find(|v| v.one_shot() && v.sound.key == sound.key && now - v.started <= merge)
         {
             // A little louder each time, up to 3 dB over the louder of the first two.
             let base = v.base_gain.max(sound.gain);
@@ -164,7 +266,7 @@ impl Mixer {
                 .voices
                 .iter()
                 .enumerate()
-                .filter(|(_, v)| v.fading.is_none())
+                .filter(|(_, v)| v.one_shot())
                 .filter(|(_, v)| if full_key { v.sound.key == sound.key } else { v.sound.bus != Bus::Ui })
                 .min_by(|a, b| Self::score(&a.1.sound).total_cmp(&Self::score(&b.1.sound)))
                 .map(|(i, v)| (i, Self::score(&v.sound)));
@@ -180,13 +282,112 @@ impl Mixer {
                 _ => return Played::Dropped,
             }
         }
-        self.voices.push(Voice { sound, at: 0.0, started: now, base_gain: sound.gain, fading: None });
+        self.voices.push(Voice::new(sound, now));
         if stolen { Played::Stole } else { Played::Started }
     }
 
-    /// Stop everything at once.
+    /// Loops playing, not counting ones fading out.
+    pub fn loops(&self) -> usize {
+        self.voices.iter().filter(|v| v.looping.is_some() && v.env_to > 0.0).count()
+    }
+
+    /// Whether loop `id` still plays (and isn't fading out): a stolen or stopped loop doesn't.
+    pub fn looping(&self, id: LoopId) -> bool {
+        self.voices.iter().any(|v| v.looping == Some(id.0) && v.env_to > 0.0)
+    }
+
+    /// Start `sound` playing round and round, fading in over `fade` seconds. Over `max_loops`, the loop with the
+    /// lowest score gives way if the new one beats it; otherwise, or when muted or with no clip, it doesn't start.
+    pub fn start_loop(&mut self, sound: Sound, fade: f32) -> Option<LoopId> {
+        if self.muted || self.clips.get(sound.clip.0 as usize).is_none_or(|c| c.samples.len() < 2) {
+            return None;
+        }
+        if self.loops() >= self.max_loops.max(1) {
+            let (i, worst) = self
+                .voices
+                .iter()
+                .enumerate()
+                .filter(|(_, v)| v.looping.is_some() && v.env_to > 0.0)
+                .map(|(i, v)| (i, Self::score(&v.sound)))
+                .min_by(|a, b| a.1.total_cmp(&b.1))?;
+            if worst >= Self::score(&sound) {
+                return None;
+            }
+            let v = &mut self.voices[i];
+            v.env_to = 0.0;
+            v.env_step = ramp(FADE, self.rate);
+        }
+        let id = self.next_loop;
+        self.next_loop = self.next_loop.wrapping_add(1);
+        let mut v = Voice::new(sound, self.now);
+        v.looping = Some(id);
+        v.env = 0.0;
+        v.env_step = ramp(fade, self.rate);
+        self.voices.push(v);
+        Some(LoopId(id))
+    }
+
+    /// Move loop `id` to a new level and place, gliding there over the next buffer.
+    pub fn set_loop(&mut self, id: LoopId, gain: f32, pan: f32) {
+        if let Some(v) = self.voices.iter_mut().find(|v| v.looping == Some(id.0)) {
+            v.gain_to = gain.max(0.0);
+            v.pan_to = pan.clamp(-1.0, 1.0);
+        }
+    }
+
+    /// Fade loop `id` out over `fade` seconds, then let it go.
+    pub fn stop_loop(&mut self, id: LoopId, fade: f32) {
+        if let Some(v) = self.voices.iter_mut().find(|v| v.looping == Some(id.0)) {
+            v.env_to = 0.0;
+            v.env_step = ramp(fade, self.rate);
+        }
+    }
+
+    pub fn add_track(&mut self, track: Track) -> TrackId {
+        self.tracks.push(track);
+        TrackId(self.tracks.len() as u32 - 1)
+    }
+
+    pub fn track(&self, id: TrackId) -> &Track {
+        &self.tracks[id.0 as usize]
+    }
+
+    /// Play `track` on the music bus at linear `gain`, crossfading from whatever plays over `fade` seconds (equal
+    /// power, so the sum doesn't dip). A `looping` track starts over at its end; any other stops there.
+    pub fn play_music(&mut self, track: TrackId, gain: f32, fade: f32, looping: bool) {
+        if self.tracks.get(track.0 as usize).is_none() {
+            return;
+        }
+        self.stop_music(fade);
+        let step = ramp(fade, self.rate);
+        let cache = [(usize::MAX, Vec::new()), (usize::MAX, Vec::new())];
+        self.decks.push(Deck { track, at: 0.0, gain, looping, env: 0.0, env_to: 1.0, env_step: step, cache });
+    }
+
+    /// Fade the music out over `fade` seconds.
+    pub fn stop_music(&mut self, fade: f32) {
+        let step = ramp(fade, self.rate);
+        for d in &mut self.decks {
+            d.env_to = 0.0;
+            d.env_step = step;
+        }
+    }
+
+    /// The track playing, unless it is fading out or has come to its end.
+    pub fn music(&self) -> Option<TrackId> {
+        self.decks.iter().rev().find(|d| d.env_to > 0.0).map(|d| d.track)
+    }
+
+    /// How far into the current track the music is, in seconds.
+    pub fn music_at(&self) -> Option<f32> {
+        let d = self.decks.iter().rev().find(|d| d.env_to > 0.0)?;
+        Some(d.at as f32 / self.tracks[d.track.0 as usize].rate as f32)
+    }
+
+    /// Stop everything at once: sounds, loops and music.
     pub fn stop_all(&mut self) {
         self.voices.clear();
+        self.decks.clear();
     }
 
     /// Fill `out`, interleaved with `channels` channels, and advance the clock. Stereo goes to the first two
@@ -196,22 +397,40 @@ impl Mixer {
         let channels = channels.max(1);
         let frames = out.len() / channels;
         let master = if self.muted { 0.0 } else { self.master };
+        // Constant-power pan.
+        let sides = |gain: f32, pan: f32| {
+            let pan = pan.clamp(-1.0, 1.0);
+            (((1.0 - pan) / 2.0).sqrt() * gain, ((1.0 + pan) / 2.0).sqrt() * gain)
+        };
         for v in &mut self.voices {
             let clip = &self.clips[v.sound.clip.0 as usize];
+            let len = clip.samples.len();
             let step = clip.rate as f64 / self.rate as f64 * v.sound.speed.max(0.01) as f64;
-            let gain = v.sound.gain * self.bus_gain[v.sound.bus as usize] * master;
-            let pan = v.sound.pan.clamp(-1.0, 1.0);
-            // Constant-power pan.
-            let (gl, gr) = (((1.0 - pan) / 2.0).sqrt() * gain, ((1.0 + pan) / 2.0).sqrt() * gain);
+            let bus = self.bus_gain[v.sound.bus as usize] * master;
+            // A loop glides from where it was to where it was last set, over this buffer.
+            let (l0, r0) = sides(v.sound.gain * bus, v.sound.pan);
+            let (l1, r1) = if v.looping.is_some() { sides(v.gain_to * bus, v.pan_to) } else { (l0, r0) };
+            if v.looping.is_some() {
+                v.sound.gain = v.gain_to;
+                v.sound.pan = v.pan_to;
+            }
             let fade_len = (FADE * self.rate as f32).max(1.0);
             for f in 0..frames {
                 let i = v.at as usize;
-                if i + 1 >= clip.samples.len() {
-                    v.at = clip.samples.len() as f64;
-                    break;
-                }
                 let t = (v.at - i as f64) as f32;
-                let mut s = clip.samples[i] * (1.0 - t) + clip.samples[i + 1] * t;
+                let mut s = if v.looping.is_some() {
+                    approach(&mut v.env, v.env_to, v.env_step);
+                    if v.env <= 0.0 && v.env_to <= 0.0 {
+                        break;
+                    }
+                    (clip.samples[i % len] * (1.0 - t) + clip.samples[(i + 1) % len] * t) * v.env
+                } else {
+                    if i + 1 >= len {
+                        v.at = len as f64;
+                        break;
+                    }
+                    clip.samples[i] * (1.0 - t) + clip.samples[i + 1] * t
+                };
                 if let Some(left) = &mut v.fading {
                     if *left == 0 {
                         break;
@@ -219,6 +438,8 @@ impl Mixer {
                     s *= *left as f32 / fade_len;
                     *left -= 1;
                 }
+                let k = f as f32 / frames.max(1) as f32;
+                let (gl, gr) = (l0 + (l1 - l0) * k, r0 + (r1 - r0) * k);
                 let o = &mut out[f * channels..(f + 1) * channels];
                 if channels == 1 {
                     o[0] += s * (gl + gr) / 2.0;
@@ -227,11 +448,56 @@ impl Mixer {
                     o[1] += s * gr;
                 }
                 v.at += step;
+                if v.looping.is_some() && v.at >= len as f64 {
+                    v.at -= len as f64;
+                }
             }
         }
         let clips = &self.clips;
-        self.voices
-            .retain(|v| v.fading != Some(0) && (v.at as usize) + 1 < clips[v.sound.clip.0 as usize].samples.len());
+        self.voices.retain(|v| match v.looping {
+            Some(_) => v.env > 0.0 || v.env_to > 0.0,
+            None => v.fading != Some(0) && (v.at as usize) + 1 < clips[v.sound.clip.0 as usize].samples.len(),
+        });
+        let bus = self.bus_gain[Bus::Music as usize] * master;
+        for d in &mut self.decks {
+            let track = &self.tracks[d.track.0 as usize];
+            let step = track.rate as f64 / self.rate as f64;
+            let end = track.frames;
+            if end < 2 {
+                d.env = 0.0;
+                d.env_to = 0.0;
+                continue;
+            }
+            for f in 0..frames {
+                approach(&mut d.env, d.env_to, d.env_step);
+                if d.env <= 0.0 && d.env_to <= 0.0 {
+                    break;
+                }
+                let i = d.at as usize;
+                if i + 1 >= end && !d.looping {
+                    d.env = 0.0;
+                    d.env_to = 0.0;
+                    break;
+                }
+                let t = (d.at - i as f64) as f32;
+                let (a, b) = (d.frame(track, i), d.frame(track, (i + 1) % end));
+                // Equal power: the fade's square root, so two uncorrelated tracks crossing keep their loudness.
+                let g = d.env.sqrt() * d.gain * bus;
+                let (l, r) = ((a.0 * (1.0 - t) + b.0 * t) * g, (a.1 * (1.0 - t) + b.1 * t) * g);
+                let o = &mut out[f * channels..(f + 1) * channels];
+                if channels == 1 {
+                    o[0] += (l + r) / 2.0;
+                } else {
+                    o[0] += l;
+                    o[1] += r;
+                }
+                d.at += step;
+                if d.at >= end as f64 {
+                    d.at -= end as f64;
+                }
+            }
+        }
+        self.decks.retain(|d| d.env > 0.0 || d.env_to > 0.0);
         for s in out.iter_mut() {
             *s = limit(*s);
         }
@@ -393,6 +659,90 @@ mod tests {
         let mut out = vec![0.0; 2 * 100];
         m.render(&mut out, 2);
         assert!(out.iter().all(|s| s.abs() <= 1.0));
+    }
+
+    #[test]
+    fn a_loop_goes_round_until_stopped_then_fades_out() {
+        let mut m = Mixer::new(1000);
+        let c = tone(&mut m, 100);
+        let id = m.start_loop(sound(c, 5), 0.01).unwrap();
+        let mut out = vec![0.0; 2 * 50];
+        for _ in 0..10 {
+            m.render(&mut out, 2);
+        }
+        // Five times through the clip, and still going; it isn't a one-shot voice.
+        assert!(m.looping(id) && m.loops() == 1 && m.playing() == 0);
+        assert!(out.iter().any(|&s| s != 0.0));
+        m.set_loop(id, 0.5, -1.0);
+        m.render(&mut out, 2);
+        m.render(&mut out, 2);
+        assert!(out.chunks(2).all(|f| f[1].abs() < 1e-6), "panned hard left");
+        m.stop_loop(id, 0.02);
+        assert!(!m.looping(id));
+        m.render(&mut out, 2);
+        assert_eq!(m.loops(), 0);
+        m.render(&mut out, 2);
+        assert!(out.iter().all(|&s| s == 0.0), "faded out and gone");
+    }
+
+    #[test]
+    fn the_loop_cap_keeps_the_loudest() {
+        let mut m = Mixer::new(1000);
+        m.max_loops = 2;
+        let c = tone(&mut m, 100);
+        let quiet = m.start_loop(Sound { gain: 0.2, ..sound(c, 1) }, 0.0).unwrap();
+        let loud = m.start_loop(sound(c, 2), 0.0).unwrap();
+        // A quieter third doesn't start; a louder one takes the quiet one's place.
+        assert_eq!(m.start_loop(Sound { gain: 0.1, ..sound(c, 3) }, 0.0), None);
+        let louder = m.start_loop(Sound { priority: 90, ..sound(c, 4) }, 0.0).unwrap();
+        assert!(!m.looping(quiet) && m.looping(loud) && m.looping(louder));
+        assert_eq!(m.loops(), 2);
+    }
+
+    fn music_track(m: &mut Mixer, value: i16, frames: usize) -> TrackId {
+        let bytes = super::super::wav::encode_adpcm(1000, 1, &vec![value; frames], 36);
+        m.add_track(super::super::wav::decode_track(&bytes).unwrap())
+    }
+
+    #[test]
+    fn music_crossfades_from_one_track_to_the_next() {
+        let mut m = Mixer::new(1000);
+        m.bus_gain = [1.0; 4];
+        let a = music_track(&mut m, 8000, 3000);
+        let b = music_track(&mut m, -8000, 3000);
+        m.play_music(a, 1.0, 0.0, true);
+        let mut out = vec![0.0; 2 * 100];
+        m.render(&mut out, 2);
+        assert!(out.iter().all(|&s| s > 0.0), "the first track, at once");
+        m.play_music(b, 1.0, 0.2, true);
+        assert_eq!(m.music(), Some(b));
+        m.render(&mut out, 2);
+        // Half way through the fade both are heard; afterwards only the second.
+        let (first, last) = (out[0], out[out.len() - 1]);
+        assert!(first > 0.0 && last < first);
+        m.render(&mut out, 2);
+        m.render(&mut out, 2);
+        assert!(out.iter().all(|&s| s < 0.0), "the second track only");
+        assert_eq!(m.decks.len(), 1);
+    }
+
+    #[test]
+    fn music_that_doesnt_loop_stops_at_its_end() {
+        let mut m = Mixer::new(1000);
+        let a = music_track(&mut m, 8000, 150);
+        m.play_music(a, 1.0, 0.0, false);
+        let mut out = vec![0.0; 2 * 100];
+        m.render(&mut out, 2);
+        assert_eq!(m.music(), Some(a));
+        assert!(m.music_at().unwrap() > 0.09);
+        m.render(&mut out, 2);
+        assert_eq!(m.music(), None);
+        let looping = music_track(&mut m, 8000, 150);
+        m.play_music(looping, 1.0, 0.0, true);
+        for _ in 0..5 {
+            m.render(&mut out, 2);
+        }
+        assert_eq!(m.music(), Some(looping));
     }
 
     #[test]
