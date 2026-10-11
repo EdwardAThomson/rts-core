@@ -1,0 +1,12 @@
+#!/bin/sh
+# The push gate, while CI runs only when started by hand: format, clippy and tests must pass before a push leaves
+# this machine. Turn it on once per clone with `git config core.hooksPath .githooks`; skip it once with
+# `git push --no-verify`.
+set -e
+cd "$(git rev-parse --show-toplevel)"
+echo "pre-push: cargo fmt --check" >&2
+cargo fmt --check
+echo "pre-push: cargo clippy --all-targets -- -D warnings" >&2
+cargo clippy --quiet --all-targets -- -D warnings
+echo "pre-push: cargo test" >&2
+cargo test --quiet

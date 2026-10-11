@@ -13,4 +13,7 @@ The genre-neutral core shared by the Classic engine (`rts-engine`) and the 3D en
 - Clean room: never copy code from other RTS projects or remakes; ideas only, credited.
 - CI runs only when started by hand (Actions, CI, Run workflow). Before every push, run `cargo fmt --check`,
   `cargo clippy --all-targets -- -D warnings` and `cargo test` locally; they are the gate.
+  `.githooks/pre-push` runs them on every push once `git config core.hooksPath .githooks` is set in the clone.
+  `.claude/session-start.sh` sets it, and installs the Linux packages the checks need, when a Claude Code session
+  opens this repository; a session that opens a parent folder doesn't run it, so run it yourself there.
 - Reports end with Verified and Not verified lists.
