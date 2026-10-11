@@ -17,10 +17,10 @@ pub mod web;
 
 #[cfg(feature = "device")]
 pub use audio::Speaker;
-pub use audio::{Bus, ClipId, Mixer, Played, Sound};
+pub use audio::{Bus, ClipId, LoopId, Mixer, Played, Sound, TrackId};
 pub use batch::{Rect, SpriteBatch, TexId};
 pub use clock::Instant;
 pub use files::Files;
 pub use gpu::Gpu;
 pub use text::Font;
-pub use wav::Clip;
+pub use wav::{Clip, Track};
