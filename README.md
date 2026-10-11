@@ -47,6 +47,13 @@ cargo clippy --target wasm32-unknown-unknown -- -D warnings
 cargo build --no-default-features -p rts-platform                # without the sound device, so without ALSA
 ```
 
+Once per clone, turn on the pre-push hook, which runs `cargo fmt --check`, clippy and the tests before every push
+(CI runs only when started by hand, so this is the gate; `git push --no-verify` skips it once):
+
+```bash
+git config core.hooksPath .githooks
+```
+
 There is nothing to run here: the engines' repositories have the games, players and tools.
 
 The code moved here from `rts-engine`: `rts-core` from `crates/engine-core` (as merged in rts-engine PR #5), and
