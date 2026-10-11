@@ -11,4 +11,6 @@ The genre-neutral core shared by the Classic engine (`rts-engine`) and the 3D en
 - Nothing here may name a tile, unit, faction or setting. If it only makes sense for one engine, it belongs in that
   engine's repository.
 - Clean room: never copy code from other RTS projects or remakes; ideas only, credited.
+- CI runs only when started by hand (Actions, CI, Run workflow). Before every push, run `cargo fmt --check`,
+  `cargo clippy --all-targets -- -D warnings` and `cargo test` locally; they are the gate.
 - Reports end with Verified and Not verified lists.

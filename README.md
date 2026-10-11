@@ -25,7 +25,7 @@ its golden tests pass.
 
 - **Determinism** (`rts-core`). Integer maths only, the one seeded generator held in the game state, no clock, no
   threads and no iteration over `HashMap`/`HashSet`. `crates/core/clippy.toml` bans the types and the crate denies float
-  arithmetic; CI runs clippy with `-D warnings`.
+  arithmetic; clippy runs with `-D warnings` before every push (CI runs only when started by hand).
 - **A change that alters any hash is a breaking change.** Both engines' golden tests pin hashes made with this
   crate, so bump the crate version and say so.
 - **No protected names, no setting-specific words.** Generic ids only.
