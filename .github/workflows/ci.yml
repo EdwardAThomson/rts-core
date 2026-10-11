@@ -1,9 +1,10 @@
 name: CI
 
+# Runs only when started by hand (Actions, CI, Run workflow), to stay inside the free Actions minutes of private
+# repositories. Before every push, run `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and
+# `cargo test` locally; those are the gate.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
