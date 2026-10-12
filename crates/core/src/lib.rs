@@ -7,5 +7,6 @@
 pub mod hash;
 pub mod imath;
 pub mod json;
+pub mod mission;
 pub mod replay;
 pub mod rng;
