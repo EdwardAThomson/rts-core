@@ -5,7 +5,7 @@ engine (`rts-3d-engine`). Nothing here knows about tiles, units or any game's ru
 
 | Crate | Path | Has |
 |---|---|---|
-| `rts-core` | `crates/core` | `imath` (integer square root), `rng` (seeded xorshift held in the game state), `hash` (streaming canonical-JSON FNV-1a state hash with a `Canon` trait), `replay` (command queue and log), `json` (a whole-number JSON reader for rules data and setting packs) |
+| `rts-core` | `crates/core` | `imath` (integer square root), `rng` (seeded xorshift held in the game state), `hash` (streaming canonical-JSON FNV-1a state hash with a `Canon` trait), `replay` (command queue and log), `json` (a whole-number JSON reader for rules data and setting packs), `mission` (declarative mission triggers: shared conditions and actions, objectives, win and lose, with engine-specific ones plugged in; its state is hashed with the game) |
 | `rts-platform` | `crates/platform` | The renderers' platform layer, never part of a simulation: `gpu` (opening wgpu, with or without a window), `batch` (textures and a sprite batcher), `text` (a pixel font), `audio` (a mixer, buses and the sound device), `wav`, `clock`, `files` (a folder or files in memory) and, in the browser, `web` (the page, its address and fetching files) |
 
 Planned here as the engines need them: lockstep networking, the AI framework and setting-pack loading.
