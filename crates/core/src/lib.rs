@@ -4,6 +4,7 @@
 
 #![deny(clippy::float_arithmetic, clippy::disallowed_types)]
 
+pub mod campaign;
 pub mod hash;
 pub mod imath;
 pub mod json;
