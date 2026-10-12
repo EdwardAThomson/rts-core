@@ -222,6 +222,8 @@ fn apply<A>(a: &Action<A>, state: &mut MissionState) {
 pub struct Reader<'a, C, A> {
     /// Engine ticks in a game second; times in the file are in seconds.
     pub ticks_per_second: u32,
+    /// How many players the mission has, when known, so `win` and `lose` can refuse others.
+    pub players: Option<u32>,
     /// The engine's own condition: its key and value. `None` when the key isn't one of the engine's.
     #[allow(clippy::type_complexity)]
     pub cond: &'a dyn Fn(&str, &Value) -> Option<Result<C, String>>,
@@ -257,6 +259,15 @@ fn single(v: &Value) -> Result<(&str, &Value), String> {
 }
 
 impl<C, A> Reader<'_, C, A> {
+    /// A player number from the file, which must be one of the mission's players when their number is known.
+    pub fn player(&self, v: &Value) -> Result<u32, String> {
+        let p = player(v)?;
+        match self.players {
+            Some(n) if p >= n => Err(format!("player {} isn't in the mission's players", p + 1)),
+            _ => Ok(p),
+        }
+    }
+
     /// Read a mission's `triggers` list. Every problem is reported, each with its JSON path
     /// (`triggers[2].when.all[0]: ...`), before the mission is refused.
     pub fn triggers(&self, list: &Value) -> Result<Mission<C, A>, Vec<String>> {
@@ -393,8 +404,8 @@ impl<C, A> Reader<'_, C, A> {
             })(),
             "complete" => names.objective(v).map(Action::Complete),
             "fail" => names.objective(v).map(Action::Fail),
-            "win" => player(v).map(Action::Win),
-            "lose" => player(v).map(Action::Lose),
+            "win" => self.player(v).map(Action::Win),
+            "lose" => self.player(v).map(Action::Lose),
             "say" => {
                 v.as_str().map(|l| Action::Say(l.to_string())).ok_or(format!("must be a line id, not {}", v.kind()))
             }
@@ -438,7 +449,7 @@ mod tests {
     fn read(text: &str) -> Result<Mission<u32, u32>, Vec<String>> {
         let cond = |k: &str, v: &Value| (k == "flag").then(|| v.as_int().map(|n| n as u32).ok_or("a number".into()));
         let action = |k: &str, v: &Value| (k == "raise").then(|| v.as_int().map(|n| n as u32).ok_or("a number".into()));
-        let reader = Reader { ticks_per_second: 15, cond: &cond, action: &action };
+        let reader = Reader { ticks_per_second: 15, players: None, cond: &cond, action: &action };
         reader.triggers(&parse(text).expect("valid JSON"))
     }
 
