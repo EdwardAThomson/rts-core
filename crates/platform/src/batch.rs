@@ -239,6 +239,17 @@ impl SpriteBatch {
 
     /// Draw everything queued into `target`, `width` by `height` pixels, over `clear`, and empty the queue.
     pub fn draw(&mut self, gpu: &Gpu, target: &wgpu::TextureView, width: u32, height: u32, clear: [u8; 4]) {
+        self.pass(gpu, target, width, height, Some(clear));
+    }
+
+    /// Draw everything queued into `target` over what is already there, and empty the queue: a HUD over a scene
+    /// drawn first.
+    pub fn draw_over(&mut self, gpu: &Gpu, target: &wgpu::TextureView, width: u32, height: u32) {
+        self.pass(gpu, target, width, height, None);
+    }
+
+    /// One render pass of the queued sprites, clearing to `clear` first or keeping what `target` holds.
+    fn pass(&mut self, gpu: &Gpu, target: &wgpu::TextureView, width: u32, height: u32, clear: Option<[u8; 4]>) {
         let quads = self.vertices.len() / VERTEX / 4;
         let mut screen = Vec::with_capacity(16);
         for f in [width as f32, height as f32, 0.0, 0.0] {
@@ -258,12 +269,15 @@ impl SpriteBatch {
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: c(clear[0]),
-                            g: c(clear[1]),
-                            b: c(clear[2]),
-                            a: c(clear[3]),
-                        }),
+                        load: match clear {
+                            Some(clear) => wgpu::LoadOp::Clear(wgpu::Color {
+                                r: c(clear[0]),
+                                g: c(clear[1]),
+                                b: c(clear[2]),
+                                a: c(clear[3]),
+                            }),
+                            None => wgpu::LoadOp::Load,
+                        },
                         store: wgpu::StoreOp::Store,
                     },
                 })],
