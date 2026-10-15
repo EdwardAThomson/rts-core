@@ -41,6 +41,8 @@ pub struct SpriteBatch {
     pipeline: wgpu::RenderPipeline,
     texture_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
+    /// Blending between pixels, for pictures drawn smaller or larger than they were made.
+    smooth: wgpu::Sampler,
     screen: wgpu::Buffer,
     screen_bind: wgpu::BindGroup,
     textures: Vec<Texture>,
@@ -135,6 +137,12 @@ impl SpriteBatch {
             min_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
+        let smooth = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("smooth"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
         let screen = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("screen"),
             size: 16,
@@ -150,6 +158,7 @@ impl SpriteBatch {
             pipeline,
             texture_layout,
             sampler,
+            smooth,
             screen,
             screen_bind,
             textures: Vec::new(),
@@ -188,12 +197,28 @@ impl SpriteBatch {
             size,
         );
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        self.texture_view(gpu, &view, width, height, false)
+    }
+
+    /// Draw from a texture made elsewhere, `width` by `height` pixels, and return its id: one an engine renders
+    /// into, such as unit portraits drawn from their models. It must have been made with `TEXTURE_BINDING` usage in
+    /// a filterable colour format. `smooth` blends between its pixels where it is drawn at another size, as suits a
+    /// rendered picture; otherwise each screen pixel takes the nearest one, as suits pixel art.
+    pub fn texture_view(
+        &mut self,
+        gpu: &Gpu,
+        view: &wgpu::TextureView,
+        width: u32,
+        height: u32,
+        smooth: bool,
+    ) -> TexId {
+        let sampler = if smooth { &self.smooth } else { &self.sampler };
         let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &self.texture_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(sampler) },
             ],
         });
         self.textures.push(Texture { bind, width: width as f32, height: height as f32 });
