@@ -41,6 +41,8 @@ pub struct SpriteBatch {
     pipeline: wgpu::RenderPipeline,
     texture_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
+    /// Blending between pixels, for pictures drawn smaller or larger than they were made.
+    smooth: wgpu::Sampler,
     screen: wgpu::Buffer,
     screen_bind: wgpu::BindGroup,
     textures: Vec<Texture>,
@@ -135,6 +137,12 @@ impl SpriteBatch {
             min_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
+        let smooth = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("smooth"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
         let screen = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("screen"),
             size: 16,
@@ -150,6 +158,7 @@ impl SpriteBatch {
             pipeline,
             texture_layout,
             sampler,
+            smooth,
             screen,
             screen_bind,
             textures: Vec::new(),
@@ -188,12 +197,28 @@ impl SpriteBatch {
             size,
         );
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        self.texture_view(gpu, &view, width, height, false)
+    }
+
+    /// Draw from a texture made elsewhere, `width` by `height` pixels, and return its id: one an engine renders
+    /// into, such as unit portraits drawn from their models. It must have been made with `TEXTURE_BINDING` usage in
+    /// a filterable colour format. `smooth` blends between its pixels where it is drawn at another size, as suits a
+    /// rendered picture; otherwise each screen pixel takes the nearest one, as suits pixel art.
+    pub fn texture_view(
+        &mut self,
+        gpu: &Gpu,
+        view: &wgpu::TextureView,
+        width: u32,
+        height: u32,
+        smooth: bool,
+    ) -> TexId {
+        let sampler = if smooth { &self.smooth } else { &self.sampler };
         let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &self.texture_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(sampler) },
             ],
         });
         self.textures.push(Texture { bind, width: width as f32, height: height as f32 });
@@ -239,6 +264,17 @@ impl SpriteBatch {
 
     /// Draw everything queued into `target`, `width` by `height` pixels, over `clear`, and empty the queue.
     pub fn draw(&mut self, gpu: &Gpu, target: &wgpu::TextureView, width: u32, height: u32, clear: [u8; 4]) {
+        self.pass(gpu, target, width, height, Some(clear));
+    }
+
+    /// Draw everything queued into `target` over what is already there, and empty the queue: a HUD over a scene
+    /// drawn first.
+    pub fn draw_over(&mut self, gpu: &Gpu, target: &wgpu::TextureView, width: u32, height: u32) {
+        self.pass(gpu, target, width, height, None);
+    }
+
+    /// One render pass of the queued sprites, clearing to `clear` first or keeping what `target` holds.
+    fn pass(&mut self, gpu: &Gpu, target: &wgpu::TextureView, width: u32, height: u32, clear: Option<[u8; 4]>) {
         let quads = self.vertices.len() / VERTEX / 4;
         let mut screen = Vec::with_capacity(16);
         for f in [width as f32, height as f32, 0.0, 0.0] {
@@ -258,12 +294,15 @@ impl SpriteBatch {
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: c(clear[0]),
-                            g: c(clear[1]),
-                            b: c(clear[2]),
-                            a: c(clear[3]),
-                        }),
+                        load: match clear {
+                            Some(clear) => wgpu::LoadOp::Clear(wgpu::Color {
+                                r: c(clear[0]),
+                                g: c(clear[1]),
+                                b: c(clear[2]),
+                                a: c(clear[3]),
+                            }),
+                            None => wgpu::LoadOp::Load,
+                        },
                         store: wgpu::StoreOp::Store,
                     },
                 })],

@@ -6,7 +6,7 @@ engine (`rts-3d-engine`). Nothing here knows about tiles, units or any game's ru
 | Crate | Path | Has |
 |---|---|---|
 | `rts-core` | `crates/core` | `imath` (integer square root), `rng` (seeded xorshift held in the game state), `hash` (streaming canonical-JSON FNV-1a state hash with a `Canon` trait), `replay` (command queue and log), `json` (a whole-number JSON reader for rules data and setting packs), `mission` (declarative mission triggers: shared conditions and actions, objectives, win and lose, with engine-specific ones plugged in; its state is hashed with the game), `campaign` (a campaign as data: a text territory map, levels of territory choices each with its mission, and the player's progress as a small text file) |
-| `rts-platform` | `crates/platform` | The renderers' platform layer, never part of a simulation: `gpu` (opening wgpu, with or without a window), `batch` (textures and a sprite batcher), `text` (a pixel font), `audio` (a mixer, buses and the sound device), `wav`, `clock`, `files` (a folder or files in memory) and, in the browser, `web` (the page, its address and fetching files) |
+| `rts-platform` | `crates/platform` | The renderers' platform layer, never part of a simulation: `gpu` (opening wgpu, with or without a window), `batch` (textures and a sprite batcher), `text` (a pixel font), `skin` (a setting pack's UI skin from `theme/theme.json`: nine-slice frames, glyphs, emblems, cursors and baked fonts, read own pack first), `audio` (a mixer, buses and the sound device), `wav`, `clock`, `files` (a folder or files in memory) and, in the browser, `web` (the page, its address and fetching files) |
 
 Planned here as the engines need them: lockstep networking, the AI framework and setting-pack loading.
 
@@ -30,7 +30,7 @@ its golden tests pass.
   crate, so bump the crate version and say so.
 - **No protected names, no setting-specific words.** Generic ids only.
 - **No third-party dependencies** unless one clearly pays for itself. `rts-core` has none. `rts-platform` has wgpu,
-  pollster and cpal (sound; on Linux it builds against ALSA's headers, `libasound2-dev`, or build it without the
+  pollster, png (the skin's pictures) and cpal (sound; on Linux it builds against ALSA's headers, `libasound2-dev`, or build it without the
   `device` feature), plus wasm-bindgen, wasm-bindgen-futures, js-sys and web-sys for the browser.
 
 ## Building and testing
@@ -57,4 +57,4 @@ git config core.hooksPath .githooks
 There is nothing to run here: the engines' repositories have the games, players and tools.
 
 The code moved here from `rts-engine`: `rts-core` from `crates/engine-core` (as merged in rts-engine PR #5), and
-`rts-platform` from `crates/classic-render/src/platform`.
+`rts-platform` from `crates/classic-render/src/platform`, and its `skin` from `crates/classic-render/src/skin.rs`.
