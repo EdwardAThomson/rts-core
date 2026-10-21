@@ -11,4 +11,12 @@ The genre-neutral core shared by the Classic engine (`rts-engine`) and the 3D en
 - Nothing here may name a tile, unit, faction or setting. If it only makes sense for one engine, it belongs in that
   engine's repository.
 - Clean room: never copy code from other RTS projects or remakes; ideas only, credited.
+- CI runs only when started by hand (Actions, CI, Run workflow), and the whole test suite runs about once a day,
+  not on every push. While working, run only the tests for the files you change. The push gate is
+  `.githooks/pre-push`, which runs `.githooks/spot-check` on what the push sends: `cargo fmt --check`,
+  `cargo clippy --all-targets -- -D warnings`, the tests for the changed files, and the goldens when simulation code
+  or data changed. Don't rerun those by hand just before a push. The daily full run is
+  `CHECKS=full .githooks/spot-check`, done by the first session of the day that pushes code; nothing is scheduled. The hook is on once `git config core.hooksPath .githooks` is set in the clone.
+  `.claude/session-start.sh` sets it, and installs the Linux packages the checks need, when a Claude Code session
+  opens this repository; a session that opens a parent folder doesn't run it, so run it yourself there.
 - Reports end with Verified and Not verified lists.

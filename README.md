@@ -5,8 +5,8 @@ engine (`rts-3d-engine`). Nothing here knows about tiles, units or any game's ru
 
 | Crate | Path | Has |
 |---|---|---|
-| `rts-core` | `crates/core` | `imath` (integer square root), `rng` (seeded xorshift held in the game state), `hash` (streaming canonical-JSON FNV-1a state hash with a `Canon` trait), `replay` (command queue and log) |
-| `rts-platform` | `crates/platform` | The renderers' platform layer, never part of a simulation: `gpu` (opening wgpu, with or without a window), `batch` (textures and a sprite batcher), `text` (a pixel font), `audio` (a mixer with buses, loops, music with crossfades, and the sound device), `wav` (PCM and IMA ADPCM), `clock`, `files` (a folder or files in memory) and, in the browser, `web` (the page, its address and fetching files) |
+| `rts-core` | `crates/core` | `imath` (integer square root), `rng` (seeded xorshift held in the game state), `hash` (streaming canonical-JSON FNV-1a state hash with a `Canon` trait), `replay` (command queue and log), `json` (a whole-number JSON reader for rules data and setting packs), `mission` (declarative mission triggers: shared conditions and actions, objectives, win and lose, with engine-specific ones plugged in; its state is hashed with the game), `campaign` (a campaign as data: a text territory map, levels of territory choices each with its mission, and the player's progress as a small text file) |
+| `rts-platform` | `crates/platform` | The renderers' platform layer, never part of a simulation: `gpu` (opening wgpu, with or without a window), `batch` (textures and a sprite batcher), `text` (a pixel font), `skin` (a setting pack's UI skin from `theme/theme.json`: nine-slice frames, glyphs, emblems, cursors and baked fonts, read own pack first), `audio` (a mixer with buses, loops, music with crossfades, and the sound device), `wav` (PCM and IMA ADPCM), `clock`, `files` (a folder or files in memory) and, in the browser, `web` (the page, its address and fetching files) |
 
 Planned here as the engines need them: lockstep networking, the AI framework and setting-pack loading.
 
@@ -25,12 +25,12 @@ its golden tests pass.
 
 - **Determinism** (`rts-core`). Integer maths only, the one seeded generator held in the game state, no clock, no
   threads and no iteration over `HashMap`/`HashSet`. `crates/core/clippy.toml` bans the types and the crate denies float
-  arithmetic; CI runs clippy with `-D warnings`.
+  arithmetic; clippy runs with `-D warnings` before every push (CI runs only when started by hand).
 - **A change that alters any hash is a breaking change.** Both engines' golden tests pin hashes made with this
   crate, so bump the crate version and say so.
 - **No protected names, no setting-specific words.** Generic ids only.
 - **No third-party dependencies** unless one clearly pays for itself. `rts-core` has none. `rts-platform` has wgpu,
-  pollster and cpal (sound; on Linux it builds against ALSA's headers, `libasound2-dev`, or build it without the
+  pollster, png (the skin's pictures) and cpal (sound; on Linux it builds against ALSA's headers, `libasound2-dev`, or build it without the
   `device` feature), plus wasm-bindgen, wasm-bindgen-futures, js-sys and web-sys for the browser.
 
 ## Building and testing
@@ -47,7 +47,16 @@ cargo clippy --target wasm32-unknown-unknown -- -D warnings
 cargo build --no-default-features -p rts-platform                # without the sound device, so without ALSA
 ```
 
+Once per clone, turn on the pre-push hook. It runs `.githooks/spot-check` on what each push sends: `cargo fmt --check`,
+clippy, the tests for the changed files, and the goldens when simulation code changed. CI runs only when started by
+hand, so this is the gate; the whole `cargo test` runs about once a day (`CHECKS=full .githooks/spot-check`), and
+`git push --no-verify` skips the hook once:
+
+```bash
+git config core.hooksPath .githooks
+```
+
 There is nothing to run here: the engines' repositories have the games, players and tools.
 
 The code moved here from `rts-engine`: `rts-core` from `crates/engine-core` (as merged in rts-engine PR #5), and
-`rts-platform` from `crates/classic-render/src/platform`.
+`rts-platform` from `crates/classic-render/src/platform`, and its `skin` from `crates/classic-render/src/skin.rs`.

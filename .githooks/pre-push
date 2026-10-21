@@ -1,0 +1,17 @@
+#!/bin/sh
+# The push gate, while CI runs only when started by hand: spot checks on what the push sends (.githooks/spot-check:
+# format, clippy, the tests for the changed files, and the goldens when simulation code changed). The whole suite runs
+# about once a day instead; `CHECKS=full git push` runs it here. Turn the hook on once per clone with
+# `git config core.hooksPath .githooks`; skip it once with `git push --no-verify`.
+set -e
+cd "$(git rev-parse --show-toplevel)"
+zero=0000000000000000000000000000000000000000
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue # a deleted branch
+  if [ "$remote_sha" != "$zero" ] && git cat-file -e "$remote_sha" 2>/dev/null; then
+    base=$(git merge-base "$remote_sha" "$local_sha" || true)
+  else
+    base=$(git merge-base origin/main "$local_sha" 2>/dev/null || true)
+  fi
+  .githooks/spot-check "$base" "$local_sha"
+done
