@@ -10,6 +10,19 @@ engine (`rts-3d-engine`). Nothing here knows about tiles, units or any game's ru
 
 Planned here as the engines need them: lockstep networking, the AI framework and setting-pack loading.
 
+## The repositories
+
+The project is five repositories under [EdwardAThomson](https://github.com/EdwardAThomson). Only the two engines
+are built and run; the others are pulled in by them or read alongside them.
+
+| Repository | Visibility | What it holds | How the others use it |
+|---|---|---|---|
+| **rts-core** (this one) | public | The genre-neutral deterministic core (`rts-core`: integer maths, the seeded generator, the state hash, replays, the JSON reader, missions, campaigns) and the renderers' platform layer (`rts-platform`: GPU, sprites, text, UI skin, sound, music, files, browser page) | Both engines pin it by commit in `Cargo.toml`; `cargo` fetches it, so there is nothing to clone. A change to it reaches an engine only when that engine moves its pin and its golden tests pass |
+| [rts-engine](https://github.com/EdwardAThomson/rts-engine) | private | The Classic engine: 2D tile RTS simulation, computer opponent, tools, the wgpu player (desktop and browser), the public `generic` setting pack, and the Blender art studio | Built on rts-core. Its art studio also exports the 3D engine's glTF models |
+| [rts-3d-engine](https://github.com/EdwardAThomson/rts-3d-engine) | private | The 3D engine: heightmap terrain, continuous movement, real projectiles, its computer opponent, the wgpu player (desktop and browser) and its own `generic` pack | Built on rts-core, and shares the platform layer, HUD layout and save format with the Classic engine |
+| [rts-setting-private](https://github.com/EdwardAThomson/rts-setting-private) | private | Private, data-only setting packs for the Classic engine (every setting-specific name lives only here), plus the scripts that make their art, maps, campaigns, sounds and voices | Cloned into the Classic engine's git-ignored `settings-private/` folder and picked with `--setting`. The engines run without it, on their `generic` packs |
+| [ai-gamedev-playbooks](https://github.com/EdwardAThomson/ai-gamedev-playbooks) | private | The design docs (`plans/rts/` for both engines, `plans/rts-3d/` for the 3D one, `plans/rts/engine-parity.md`), guides and reviews | Read, never built: no code depends on it |
+
 ## Using it
 
 ```toml
