@@ -47,8 +47,10 @@ cargo clippy --target wasm32-unknown-unknown -- -D warnings
 cargo build --no-default-features -p rts-platform                # without the sound device, so without ALSA
 ```
 
-Once per clone, turn on the pre-push hook, which runs `cargo fmt --check`, clippy and the tests before every push
-(CI runs only when started by hand, so this is the gate; `git push --no-verify` skips it once):
+Once per clone, turn on the pre-push hook. It runs `.githooks/spot-check` on what each push sends: `cargo fmt --check`,
+clippy, the tests for the changed files, and the goldens when simulation code changed. CI runs only when started by
+hand, so this is the gate; the whole `cargo test` runs about once a day (`CHECKS=full .githooks/spot-check`), and
+`git push --no-verify` skips the hook once:
 
 ```bash
 git config core.hooksPath .githooks

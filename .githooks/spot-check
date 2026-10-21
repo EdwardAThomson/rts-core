@@ -1,0 +1,81 @@
+#!/bin/sh
+# Spot checks: format, clippy, and only the tests for what changed since a base commit, plus the goldens when
+# simulation code or data changed. The pre-push hook runs this on what a push sends; the whole `cargo test` runs about
+# once a day instead (CHECKS=full).
+#
+#   .githooks/spot-check                 changes since this branch left origin/main, working tree included
+#   .githooks/spot-check BASE [HEAD]     changes from BASE to HEAD (the working tree when HEAD is left out)
+#   CHECKS=full .githooks/spot-check     fmt, clippy and the whole `cargo test`
+#
+# Tests picked for a changed file under crates/<crate>/:
+#   tests/<name>.rs        that test file
+#   tests/<dir>/...        every test file of the crate (a shared helper changed)
+#   src/.../<name>.rs      the crate's unit tests, and tests/<name>.rs when it exists
+set -e
+cd "$(git rev-parse --show-toplevel)"
+
+# What can move a state hash in this repository, and the tests that pin the hashes.
+SIM='^(crates/core/|Cargo\.(toml|lock)$)'
+goldens() { run cargo test --quiet -p rts-core; }
+
+run() {
+  echo "spot-check: $*" >&2
+  "$@"
+}
+
+full() {
+  run cargo clippy --quiet --all-targets -- -D warnings
+  run cargo test --quiet
+  exit 0
+}
+
+run cargo fmt --check
+[ "$CHECKS" = full ] && full
+
+base=${1:-$(git merge-base HEAD origin/main 2>/dev/null || true)}
+[ -n "$base" ] || { echo "spot-check: no base to compare with; running everything" >&2; full; }
+if [ -n "$2" ]; then
+  changed=$(git diff --name-only "$base" "$2")
+else
+  changed=$(git diff --name-only "$base"; git ls-files --others --exclude-standard)
+fi
+
+if [ -z "$changed" ]; then
+  echo "spot-check: nothing changed" >&2
+  exit 0
+fi
+if ! echo "$changed" | grep -qv '\.md$'; then
+  echo "spot-check: only Markdown changed; nothing more to check" >&2
+  exit 0
+fi
+run cargo clippy --quiet --all-targets -- -D warnings
+
+# One line per test target, "<package> <cargo test flag>", then one `cargo test` per package.
+picks=$(
+  for f in $changed; do
+    case "$f" in crates/*/*) ;; *) continue ;; esac
+    dir=${f#crates/}
+    dir=${dir%%/*}
+    rest=${f#crates/"$dir"/}
+    [ -f "crates/$dir/Cargo.toml" ] || continue
+    pkg=$(sed -n 's/^name = "\(.*\)"/\1/p' "crates/$dir/Cargo.toml" | head -n 1)
+    name=${f##*/}
+    name=${name%.rs}
+    case "$rest" in
+      tests/*/*) echo "$pkg --tests" ;;
+      tests/*.rs) [ -f "$f" ] && echo "$pkg --test $name" ;;
+      src/*)
+        [ -f "crates/$dir/src/lib.rs" ] && echo "$pkg --lib"
+        [ -f "crates/$dir/tests/$name.rs" ] && echo "$pkg --test $name"
+        ;;
+    esac
+  done | sort -u
+)
+for pkg in $(echo "$picks" | cut -d ' ' -f 1 | sort -u); do
+  # shellcheck disable=SC2046 # the flags split on purpose
+  run cargo test --quiet -p "$pkg" $(echo "$picks" | sed -n "s/^$pkg //p")
+done
+
+if echo "$changed" | grep -qE "$SIM"; then
+  goldens
+fi
