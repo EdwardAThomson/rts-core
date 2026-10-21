@@ -1,5 +1,5 @@
 //! The platform layer both engines' renderers stand on: the GPU, textures, a sprite batcher, a pixel font, a setting
-//! pack's UI skin (frames, glyphs, cursors and baked fonts), sound (a mixer, the sound device and WAV files), a clock,
+//! pack's UI skin (frames, glyphs, cursors and baked fonts), sound (a mixer, the sound device, WAV files and music that follows a game), a clock,
 //! file access and (in the browser) the page. Nothing here knows about tiles, units or games, and nothing here is part
 //! of a simulation: it may use floating point and the clock, and it never touches game state.
 //!
@@ -10,6 +10,7 @@ pub mod batch;
 pub mod clock;
 pub mod files;
 pub mod gpu;
+pub mod music;
 pub mod skin;
 pub mod text;
 pub mod wav;
