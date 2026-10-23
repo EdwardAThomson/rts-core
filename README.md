@@ -12,7 +12,7 @@ Planned here as the engines need them: lockstep networking, the AI framework and
 
 ## The repositories
 
-The project is five repositories under [EdwardAThomson](https://github.com/EdwardAThomson). Only the two engines
+The project is six repositories under [EdwardAThomson](https://github.com/EdwardAThomson). Only the two engines
 are built and run; the others are pulled in by them or read alongside them.
 
 | Repository | Visibility | What it holds | How the others use it |
@@ -21,6 +21,7 @@ are built and run; the others are pulled in by them or read alongside them.
 | [rts-engine](https://github.com/EdwardAThomson/rts-engine) | private | The Classic engine: 2D tile RTS simulation, computer opponent, tools, the wgpu player (desktop and browser), the public `generic` setting pack, and the Blender art studio | Built on rts-core. Its art studio also exports the 3D engine's glTF models |
 | [rts-3d-engine](https://github.com/EdwardAThomson/rts-3d-engine) | private | The 3D engine: heightmap terrain, continuous movement, real projectiles, its computer opponent, the wgpu player (desktop and browser) and its own `generic` pack | Built on rts-core, and shares the platform layer, HUD layout and save format with the Classic engine |
 | [rts-setting-private](https://github.com/EdwardAThomson/rts-setting-private) | private | Private, data-only setting packs for the Classic engine (every setting-specific name lives only here), plus the scripts that make their art, maps, campaigns, sounds and voices | Cloned into the Classic engine's git-ignored `settings-private/` folder and picked with `--setting`. The engines run without it, on their `generic` packs |
+| [rts-packs-free](https://github.com/EdwardAThomson/rts-packs-free) | public | Free, data-only setting packs for both engines, each `packs/<pack>/` with `pack.json` and a `classic/` and a `3d/` folder (Pigeons Vs Magpies first) | Found by both players in their `packs/` folders (clone it into an engine's git-ignored `packs/` while developing) and offered on the title screen, or picked with `--setting` / `--pack` by id |
 | [ai-gamedev-playbooks](https://github.com/EdwardAThomson/ai-gamedev-playbooks) | private | The design docs (`plans/rts/` for both engines, `plans/rts-3d/` for the 3D one, `plans/rts/engine-parity.md`), guides and reviews | Read, never built: no code depends on it |
 
 ## Using it
