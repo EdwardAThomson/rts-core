@@ -279,8 +279,13 @@ impl<C, A> Reader<'_, C, A> {
         let mut ids: Vec<String> = Vec::new();
         for (i, t) in items.iter().enumerate() {
             match t.get("id").and_then(Value::as_str) {
-                Some(id) if ids.iter().any(|x| x == id) => errors.push(format!("triggers[{i}].id: {id} is used twice")),
-                Some(id) => ids.push(id.to_string()),
+                // Kept in the list anyway, so the triggers and their ids still line up.
+                Some(id) => {
+                    if ids.iter().any(|x| x == id) {
+                        errors.push(format!("triggers[{i}].id: {id} is used twice"));
+                    }
+                    ids.push(id.to_string());
+                }
                 None => {
                     errors.push(format!("triggers[{i}].id: missing"));
                     ids.push(String::new());
@@ -556,6 +561,16 @@ mod tests {
                 "triggers[2].do[0].dance: unknown action",
             ]
         );
+    }
+
+    #[test]
+    fn a_trigger_id_used_twice_is_refused_not_a_panic() {
+        let errors = read(
+            r#"[{ "id": "a", "when": { "at_time": 0 }, "do": [{ "win": 1 }] },
+                { "id": "a", "when": { "at_time": 1 }, "do": [{ "lose": 1 }] }]"#,
+        )
+        .expect_err("refused");
+        assert_eq!(errors, ["triggers[1].id: a is used twice"]);
     }
 
     #[test]
